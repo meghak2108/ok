@@ -1,17 +1,38 @@
-﻿import os
+import os
 import re
 import tempfile
 from pathlib import Path
 import streamlit as st
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
-from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaFileUpload
 
 # ---------------- CONFIG ----------------
-CLIENT_SECRET_FILE = {"installed":{"client_id":"257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com","project_id":"clever-cogency-475005-p0","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"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","redirect_uris":["http://localhost"]}}
-TOKEN_FILE = {"token": "ya29.a0AQQ_BDTBqcuVE2DhYug5Yu5sD2gJKd04SEWImI_kbQ1mgJAXe1fEeCiB7e8KWlDDnUj46efq2w7qBcQvKk8Cw51F7rS6ZLomRZrOl3_road8JyGREY_s8eavjFu7yapoP4Ct3jsbRgCvnqolDbziBNAexusdqNQEhfHSD9W7-AqnK1Fyv9uTB8Fc6bFLX-2DhWyxn_AaCgYKASUSARMSFQHGX2Mi7PnVlvA2huIXVbauQENfQQ0206", "refresh_token": "1//0gMbaRfUYufSzCgYIARAAGBASNwF-L9IrD0hcuJTLxx1oxu2-wWmqEzXUBpeoXC3ztcbIQfA7hmhU7Yi9snG7PfvTHKpZXmvxkbs", "token_uri": "https://oauth2.googleapis.com/token", "client_id": "257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com", "client_secret": "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", "scopes": ["https://www.googleapis.com/auth/drive.file"], "universe_domain": "googleapis.com", "account": "", "expiry": "2025-10-22T10:59:30Z"}
+CLIENT_SECRET_FILE = {
+    "installed": {
+        "client_id": "257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com",
+        "project_id": "clever-cogency-475005-p0",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret": "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",
+        "redirect_uris": ["http://localhost"]
+    }
+}
+
+TOKEN_FILE = {
+    "token": "ya29.a0AQQ_BDTBqcuVE2DhYug5Yu5sD2gJKd04SEWImI_kbQ1mgJAXe1fEeCiB7e8KWlDDnUj46efq2w7qBcQvKk8Cw51F7rS6ZLomRZrOl3_road8JyGREY_s8eavjFu7yapoP4Ct3jsbRgCvnqolDbziBNAexusdqNQEhfHSD9W7-AqnK1Fyv9uTB8Fc6bFLX-2DhWyxn_AaCgYKASUSARMSFQHGX2Mi7PnVlvA2huIXVbauQENfQQ0206",
+    "refresh_token": "1//0gMbaRfUYufSzCgYIARAAGBASNwF-L9IrD0hcuJTLxx1oxu2-wWmqEzXUBpeoXC3ztcbIQfA7hmhU7Yi9snG7PfvTHKpZXmvxkbs",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "client_id": "257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com",
+    "client_secret": "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",
+    "scopes": ["https://www.googleapis.com/auth/drive.file"],
+    "universe_domain": "googleapis.com",
+    "account": "",
+    "expiry": "2025-10-22T10:59:30Z"
+}
+
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 MAX_BYTES = 50 * 1024 ** 3  # 50 GB
 
@@ -20,23 +41,14 @@ DIRECTORY_FOLDER_IDS = {
     "ACS": "1wJUNj91l4w-Or8PEWeTJ7RUTGXRkXMDr",
     # Add more top-level folders here
 }
-# ---------------------------------------
 
 st.title("Drive ZIP Upload with Folder Selection & Versioning")
 
 # ---------------- Google Drive Service ----------------
 def get_gdrive_service():
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    
-    if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-        creds = flow.run_local_server(port=0)
-        # Save token for future runs
-        with open(TOKEN_FILE, "w") as token_file:
-            token_file.write(creds.to_json())
-    
+    creds = Credentials.from_authorized_user_info(TOKEN_FILE, SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
     service = build("drive", "v3", credentials=creds)
     return service
 
@@ -144,5 +156,3 @@ st.success(f"Upload completed! File ID: {response['id']}")
 
 # Cleanup
 os.remove(tmp_path)
-
-

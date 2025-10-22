@@ -10,7 +10,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
 # ---------------- CONFIG ----------------
-CLIENT_SECRET_FILE = r"C:\Users\Hp\Downloads\client_secret_257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com.json"
+CLIENT_SECRET_FILE = {"installed":{"client_id":"257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com","project_id":"clever-cogency-475005-p0","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"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","redirect_uris":["http://localhost"]}}
 TOKEN_FILE = r"C:\Users\Hp\Downloads\token.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 MAX_BYTES = 50 * 1024 ** 3  # 50 GB
@@ -144,3 +144,4 @@ st.success(f"Upload completed! File ID: {response['id']}")
 
 # Cleanup
 os.remove(tmp_path)
+

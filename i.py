@@ -11,7 +11,7 @@ from googleapiclient.errors import HttpError
 
 # ---------------- CONFIG ----------------
 CLIENT_SECRET_FILE = {"installed":{"client_id":"257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com","project_id":"clever-cogency-475005-p0","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"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","redirect_uris":["http://localhost"]}}
-TOKEN_FILE = r"C:\Users\Hp\Downloads\token.json"
+TOKEN_FILE = {"token": "ya29.a0AQQ_BDTBqcuVE2DhYug5Yu5sD2gJKd04SEWImI_kbQ1mgJAXe1fEeCiB7e8KWlDDnUj46efq2w7qBcQvKk8Cw51F7rS6ZLomRZrOl3_road8JyGREY_s8eavjFu7yapoP4Ct3jsbRgCvnqolDbziBNAexusdqNQEhfHSD9W7-AqnK1Fyv9uTB8Fc6bFLX-2DhWyxn_AaCgYKASUSARMSFQHGX2Mi7PnVlvA2huIXVbauQENfQQ0206", "refresh_token": "1//0gMbaRfUYufSzCgYIARAAGBASNwF-L9IrD0hcuJTLxx1oxu2-wWmqEzXUBpeoXC3ztcbIQfA7hmhU7Yi9snG7PfvTHKpZXmvxkbs", "token_uri": "https://oauth2.googleapis.com/token", "client_id": "257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com", "client_secret": "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", "scopes": ["https://www.googleapis.com/auth/drive.file"], "universe_domain": "googleapis.com", "account": "", "expiry": "2025-10-22T10:59:30Z"}
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 MAX_BYTES = 50 * 1024 ** 3  # 50 GB
 
@@ -144,4 +144,5 @@ st.success(f"Upload completed! File ID: {response['id']}")
 
 # Cleanup
 os.remove(tmp_path)
+
 

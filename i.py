@@ -1,158 +1,137 @@
-import os
-import re
-import tempfile
-from pathlib import Path
 import streamlit as st
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+import os
+import tempfile
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+import re
 
-# ---------------- CONFIG ----------------
-CLIENT_SECRET_FILE = {
-    "installed": {
-        "client_id": "257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com",
-        "project_id": "clever-cogency-475005-p0",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_secret": "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",
-        "redirect_uris": ["http://localhost"]
-    }
-}
+# ------------------ Google Drive Authentication ------------------
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+TOKEN_PATH = "token.json"
+CREDENTIALS_PATH = "credentials.json"
 
-TOKEN_FILE = {
-    "token": "ya29.a0AQQ_BDTBqcuVE2DhYug5Yu5sD2gJKd04SEWImI_kbQ1mgJAXe1fEeCiB7e8KWlDDnUj46efq2w7qBcQvKk8Cw51F7rS6ZLomRZrOl3_road8JyGREY_s8eavjFu7yapoP4Ct3jsbRgCvnqolDbziBNAexusdqNQEhfHSD9W7-AqnK1Fyv9uTB8Fc6bFLX-2DhWyxn_AaCgYKASUSARMSFQHGX2Mi7PnVlvA2huIXVbauQENfQQ0206",
-    "refresh_token": "1//0gMbaRfUYufSzCgYIARAAGBASNwF-L9IrD0hcuJTLxx1oxu2-wWmqEzXUBpeoXC3ztcbIQfA7hmhU7Yi9snG7PfvTHKpZXmvxkbs",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "client_id": "257082126321-j0vjhvdiieej5athd9mvk98trksts1ac.apps.googleusercontent.com",
-    "client_secret": "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",
-    "scopes": ["https://www.googleapis.com/auth/drive.file"],
-    "universe_domain": "googleapis.com",
-    "account": "",
-    "expiry": "2025-10-22T10:59:30Z"
-}
-
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-MAX_BYTES = 50 * 1024 ** 3  # 50 GB
-
-# Map top-level directories to Drive folder IDs
-DIRECTORY_FOLDER_IDS = {
-    "ACS": "1wJUNj91l4w-Or8PEWeTJ7RUTGXRkXMDr",
-    # Add more top-level folders here
-}
-
-st.title("Drive ZIP Upload with Folder Selection & Versioning")
-
-# ---------------- Google Drive Service ----------------
 def get_gdrive_service():
-    creds = Credentials.from_authorized_user_info(TOKEN_FILE, SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+    creds = None
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(TOKEN_PATH, "w") as token:
+            token.write(creds.to_json())
     service = build("drive", "v3", credentials=creds)
     return service
 
-service = get_gdrive_service()
-st.success("Authenticated successfully!")
+# ------------------ Helper: Search for Existing File ------------------
+def find_file(service, folder_id, filename):
+    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    results = service.files().list(q=query, spaces="drive", fields="files(id, name)").execute()
+    items = results.get("files", [])
+    return items[0]["id"] if items else None
 
-# ---------------- Helper: fetch folders ----------------
-def fetch_folders(parent_id):
-    """Recursively fetch all folders under a parent folder."""
-    folders = []
-    query = f"'{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    for f in results.get("files", []):
-        subfolders = fetch_folders(f["id"])
-        folders.append({"id": f["id"], "name": f["name"], "subfolders": subfolders})
-    return folders
+def list_folders(service):
+    results = service.files().list(
+        q="mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id, name)",
+        pageSize=1000
+    ).execute()
+    return results.get("files", [])
 
-def flatten_folders(folders, prefix=""):
-    """Flatten folder tree into a list of display names with IDs."""
-    flat_list = []
-    for f in folders:
-        display_name = f"{prefix}/{f['name']}" if prefix else f"{f['name']}"
-        flat_list.append((display_name, f["id"]))
-        if f["subfolders"]:
-            flat_list.extend(flatten_folders(f["subfolders"], display_name))
-    return flat_list
+def list_files_in_folder(service, folder_id):
+    results = service.files().list(
+        q=f"'{folder_id}' in parents and trashed=false",
+        fields="files(id, name, modifiedTime)",
+        orderBy="modifiedTime desc"
+    ).execute()
+    return results.get("files", [])
 
-# ---------------- Folder Selection ----------------
-top_level_dir = st.selectbox("Select Top-level Directory", list(DIRECTORY_FOLDER_IDS.keys()))
-top_folder_id = DIRECTORY_FOLDER_IDS[top_level_dir]
+# ------------------ Auto Versioning ------------------
+def get_next_version(existing_files, base_name):
+    pattern = re.compile(rf"{re.escape(base_name)}_v(\d+)")
+    max_v = 0
+    for f in existing_files:
+        match = pattern.search(f['name'])
+        if match:
+            v = int(match.group(1))
+            max_v = max(max_v, v)
+    return max_v + 1
 
-st.info("Fetching folder structure...")
-folders_tree = fetch_folders(top_folder_id)
-flat_folders = [(top_level_dir, top_folder_id)] + flatten_folders(folders_tree)
-folder_display_names = [f[0] for f in flat_folders]
+def upload_to_drive(service, folder_id, file_path, filename):
+    existing_file_id = find_file(service, folder_id, filename)
+    media = MediaFileUpload(file_path, resumable=True)
 
-selected_folder_display = st.selectbox("Select Folder to Upload", folder_display_names)
-selected_folder_id = [f[1] for f in flat_folders if f[0] == selected_folder_display][0]
+    if existing_file_id:
+        service.files().update(fileId=existing_file_id, media_body=media).execute()
+        st.success(f"✅ File updated: {filename}")
+    else:
+        file_metadata = {"name": filename, "parents": [folder_id]}
+        service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+        st.success(f"✅ New file uploaded: {filename}")
 
-# ---------------- File Uploader ----------------
-uploaded_file = st.file_uploader(f"Upload .zip file for {selected_folder_display}", type=["zip"])
-if uploaded_file is None:
-    st.stop()
+# ------------------ Streamlit App ------------------
+def main():
+    st.title("📁 Google Drive ZIP Upload with Exact Folder Name & Versioning")
 
-# Validate filename pattern
-filename = Path(uploaded_file.name).name
-pattern = re.compile(rf"^{re.escape(top_level_dir)}_V(\d+)(\.zip)?$", re.IGNORECASE)
-match = pattern.match(filename)
-if not match:
-    st.error(f"Filename must be {top_level_dir}_V<number>.zip. Example: {top_level_dir}_V1.zip")
-    st.stop()
-version_number = int(match.group(1))
+    uploader_name = st.text_input("👤 Enter your name (Uploader):", "")
+    service = get_gdrive_service()
 
-# Validate file size
-uploaded_file.seek(0, os.SEEK_END)
-size = uploaded_file.tell()
-uploaded_file.seek(0)
-if size > MAX_BYTES:
-    st.error(f"File too large ({size/(1024**3):.2f} GB). Max 50 GB allowed.")
-    st.stop()
+    # Fetch folders
+    st.subheader("📂 Select Drive Folder")
+    folders = list_folders(service)
+    folder_options = {f['name']: f['id'] for f in folders}
+    if not folder_options:
+        st.error("No folders found in your Drive.")
+        return
+    selected_folder = st.selectbox("Select a folder to upload into:", list(folder_options.keys()))
+    folder_id = folder_options[selected_folder]
 
-# Save to temp
-with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
-    tmp.write(uploaded_file.read())
-    tmp_path = tmp.name
+    # Show existing files
+    st.write(f"### Files in '{selected_folder}' folder:")
+    files = list_files_in_folder(service, folder_id)
+    if files:
+        for f in files:
+            st.write(f"- {f['name']} (Last modified: {f['modifiedTime']})")
+    else:
+        st.info("This folder is empty.")
 
-# ---------------- Handle duplicate filenames ----------------
-def get_existing_versions(folder_id, base_name):
-    """Get all files in folder starting with base_name to increment version."""
-    query = f"'{folder_id}' in parents and trashed=false and name contains '{base_name}'"
-    results = service.files().list(q=query, fields="files(name)").execute()
-    existing_versions = []
-    for f in results.get("files", []):
-        m = re.match(rf"{re.escape(base_name)}_V(\d+)\.zip", f["name"])
-        if m:
-            existing_versions.append(int(m.group(1)))
-    return existing_versions
+    uploaded_file = st.file_uploader("Upload a ZIP file", type=["zip"])
 
-base_name = top_level_dir
-existing_versions = get_existing_versions(selected_folder_id, base_name)
-if existing_versions:
-    new_version = max(existing_versions) + 1
-    filename = f"{base_name}_V{new_version}.zip"
-    st.info(f"Duplicate found. Uploading as new version: {filename}")
+    if st.button("🚀 Upload to Drive"):
+        if not uploader_name:
+            st.error("Please enter your name before uploading.")
+            return
+        if not uploaded_file:
+            st.error("Please upload a ZIP file.")
+            return
 
-# ---------------- Upload ----------------
-st.info(f"Uploading to {selected_folder_display}...")
-media = MediaFileUpload(tmp_path, mimetype="application/zip", resumable=True)
-request = service.files().create(
-    body={"name": filename, "parents": [selected_folder_id]},
-    media_body=media
-)
+        # --- File naming must match folder ---
+        base_name = selected_folder
+        uploaded_base_name = os.path.splitext(uploaded_file.name)[0]
+        if uploaded_base_name.lower() != base_name.lower():
+            st.error(f"❌ File name must exactly match folder name: '{base_name}'")
+            return
 
-response = None
-progress_bar = st.progress(0)
-status_text = st.empty()
+        # --- Save temp file ---
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            temp_name = tmp_file.name
 
-while response is None:
-    status, response = request.next_chunk()
-    if status:
-        progress_bar.progress(int(status.progress() * 100))
-        status_text.text(f"Uploading... {int(status.progress()*100)}%")
+        # --- Determine next version ---
+        next_v = get_next_version(files, base_name)
+        timestamp = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y%m%d_%H%M%S")
+        new_filename = f"{base_name}_v{next_v}_{uploader_name}_{timestamp}.zip"
+        new_path = os.path.join(tempfile.gettempdir(), new_filename)
+        os.replace(temp_name, new_path)
 
-st.success(f"Upload completed! File ID: {response['id']}")
+        upload_to_drive(service, folder_id, new_path, new_filename)
 
-# Cleanup
-os.remove(tmp_path)
+if __name__ == "__main__":
+    main()
